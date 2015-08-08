@@ -46,6 +46,8 @@ extern int write_batch;
 extern int file_old_total;
 extern struct stats stats;
 extern struct file_list *cur_flist, *first_flist, *dir_flist;
+extern int skipreadlock;
+extern int waitreadlock;
 
 BOOL extra_flist_sending_enabled;
 
@@ -335,7 +337,10 @@ void send_files(int f_in, int f_out)
 			exit_cleanup(RERR_PROTOCOL);
 		}
 
-		fd = do_open(fname, O_RDONLY, 0);
+		fd = do_open_lock(fname, O_RDONLY, 0);
+		if (DEBUG_GTE(SEND, 1))
+		  rprintf(FINFO, "sender do_open_lock %s returned %d\n",
+			  fname, fd);
 		if (fd == -1) {
 			if (errno == ENOENT) {
 				enum logcode c = am_daemon
