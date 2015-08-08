@@ -24,5 +24,6 @@ To use you must build the source with the feature enabled.
 
 
 ./configure --enable-locking
+
 make
 
