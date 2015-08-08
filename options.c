@@ -192,6 +192,8 @@ int logfile_format_has_i = 0;
 int logfile_format_has_o_or_i = 0;
 int always_checksum = 0;
 int list_only = 0;
+int skipreadlock = 0; /* skip file if locked */
+int waitreadlock = 0; /* block and wait if file is locked */
 
 #define MAX_BATCH_NAME_LEN 256	/* Must be less than MAXPATHLEN-13 */
 char *batch_name = NULL;
@@ -806,6 +808,12 @@ void usage(enum logcode F)
   rprintf(F,"     --checksum-seed=NUM     set block/file checksum seed (advanced)\n");
   rprintf(F," -4, --ipv4                  prefer IPv4\n");
   rprintf(F," -6, --ipv6                  prefer IPv6\n");
+#ifdef ENABLE_LOCKING
+  rprintf(F,"     --skipreadlock          skip files that locked\n");
+  rprintf(F,"     --no-skipreadlock       do not skip files that locked (default)\n");
+  rprintf(F,"     --waitreadlock          wait on locked files\n");
+  rprintf(F,"     --no-waitreadlock       do not wait on locked files (default)\n");
+#endif
   rprintf(F,"     --version               print version number\n");
   rprintf(F,"(-h) --help                  show this help (-h is --help only if used alone)\n");
 
@@ -1049,6 +1057,12 @@ static struct poptOption long_options[] = {
   {"dparam",           0,  POPT_ARG_STRING, 0, OPT_DAEMON, 0, 0 },
   {"detach",           0,  POPT_ARG_NONE,   0, OPT_DAEMON, 0, 0 },
   {"no-detach",        0,  POPT_ARG_NONE,   0, OPT_DAEMON, 0, 0 },
+#ifdef ENABLE_LOCKING
+  {"skipreadlock",     0,  POPT_ARG_VAL,    &skipreadlock, 1, 0, 0 },
+  {"no-skipreadlock",  0,  POPT_ARG_VAL,    &skipreadlock, 0, 0, 0 },
+  {"waitreadlock",     0,  POPT_ARG_VAL,    &waitreadlock, 1, 0, 0 },
+  {"no-waitreadlock",  0,  POPT_ARG_VAL,    &waitreadlock, 0, 0, 0 },
+#endif
   {0,0,0,0, 0, 0, 0}
 };
 

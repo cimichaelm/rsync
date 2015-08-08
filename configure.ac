@@ -1109,6 +1109,20 @@ case "$CC" in
     ;;
 esac
 
+AC_ARG_ENABLE(locking,
+	AC_HELP_STRING([--enable-locking],
+		[enable file locking checks with fctl]))
+
+if test x"$enable_locking" = x"yes"; then
+    AC_MSG_RESULT([yes])
+    AC_DEFINE(ENABLE_LOCKING, 1, [Define to turn on file locking code that may slow normal operation])
+    #
+else
+    AC_MSG_RESULT(no)
+    # ENABLE_LOCKING is undefined
+    dnl AC_DEFINE(ENABLE_LOCKING, 1, [Define to turn on file locking code that may slow normal operation])
+fi
+
 AC_CONFIG_FILES([Makefile lib/dummy zlib/dummy popt/dummy shconfig])
 AC_OUTPUT
 

@@ -32,6 +32,10 @@
 #if defined HAVE_SYS_FALLOCATE && !defined HAVE_FALLOCATE
 #include <sys/syscall.h>
 #endif
+#ifdef ENABLE_LOCKING
+#include <unistd.h>
+#include <fcntl.h>
+#endif
 
 extern int dry_run;
 extern int am_root;
@@ -40,6 +44,8 @@ extern int read_only;
 extern int list_only;
 extern int preserve_perms;
 extern int preserve_executability;
+extern int skipreadlock;
+extern int waitreadlock;
 
 #define RETURN_ERROR_IF(x,e) \
 	do { \
@@ -182,6 +188,179 @@ int do_rmdir(const char *pathname)
 	RETURN_ERROR_IF_RO_OR_LO;
 	return rmdir(pathname);
 }
+
+#ifdef ENABLE_LOCKING
+#pragma message "file locking enabled."
+#define LOCK_FCNTL 1
+#ifdef LOCK_FCNTL
+#define LOCK_SHARED F_RDLCK
+#define LOCK_EXCLUSIVE F_WRLCK
+#endif
+#ifdef LOCK_FLOCK
+#define LOCK_SHARED LOCK_SH
+#define LOCK_EXCLUSIVE LOCK_EX
+#endif
+#endif
+
+#ifdef LOCK_FCNTL
+int do_open_lock(const char *pathname, int flags, mode_t mode)
+{
+        int fd, lock_type;
+	int flg_checklock, flg_setlock;
+	int rcode; /* return code */
+	int tries; /* retry counter */
+	int more; /* loop controller */
+	int lock_delay; /* delay to wait for locking */
+	int lock_tries; /* number of times to retry */
+	int errcode; /* store errno */
+	struct flock lock; /* lock structure */
+
+	lock_delay = 5000;
+	lock_tries = 10;
+	flg_checklock = 0;
+	flg_setlock = 0;
+
+	if (skipreadlock || waitreadlock) {
+	  flg_checklock=1;
+	  flg_setlock=1;
+	}
+	
+	if (DEBUG_GTE(SEND, 1)) {
+	  if (flg_checklock)
+	    rprintf(FINFO, "INFO: checklock is enabled\n");
+	  if (flg_setlock)
+	    rprintf(FINFO, "INFO: setlock is enabled\n");
+	  if (skipreadlock)
+	    rprintf(FINFO, "INFO: skipreadlock is enabled\n");
+	  if (waitreadlock)
+	    rprintf(FINFO, "INFO: waitreadlock is enabled\n");
+	}
+
+	if (flags != O_RDONLY) {
+		RETURN_ERROR_IF(dry_run, 0);
+		RETURN_ERROR_IF_RO_OR_LO;
+	}
+
+	/* open file */
+	fd = open(pathname, flags | O_BINARY, mode);
+	if (! flg_checklock) return fd;
+
+	if (fd >= 0) {
+	  if (flags & O_WRONLY || flags & O_RDWR) {
+	    lock_type = LOCK_EXCLUSIVE;
+	  } else {
+	    lock_type = LOCK_SHARED;
+	  }
+
+	  /* obtain a lock on the file */
+
+	  lock.l_type = lock_type;
+	  lock.l_start = 0;
+	  lock.l_whence = SEEK_SET;
+	  lock.l_len = 0;
+	  tries=0;
+	  more = 1;
+	  while (more) {
+	    if ((rcode=fcntl(fd,F_GETLK,&lock)) < 0) {
+	      /* check errno */
+	      errcode = errno;
+	      if (DEBUG_GTE(SEND, 1)) {
+		rprintf(FINFO, "ERROR: fcntl GETLK. wait and try again.\n");
+		rsyserr(FINFO, errcode, "ERROR: fcntl SETLK. fd=%d", fd);
+	      }
+	      usleep(lock_delay);
+	      tries++;
+	      if (tries >= lock_tries) {
+		return fd;
+	      } else continue;
+	    }
+	    if (lock.l_type == F_UNLCK) {
+	      //file is unlocked
+	      if (flg_setlock) {
+		lock.l_type = lock_type;
+		lock.l_start = 0;
+		lock.l_whence = SEEK_SET;
+		lock.l_len = 0;
+		//set the lock
+		if ((rcode=fcntl(fd,F_SETLK,&lock))<0) {
+		  /* check errno */
+		  errcode = errno;
+		  if (DEBUG_GTE(SEND, 1)) {
+		    rprintf(FINFO, "ERROR: fcntl SETLK. errno=%d, wait and try agian.\n",errcode);
+		    rsyserr(FINFO, errcode,"ERROR: fcntl SETLK. fd=%d",fd);
+		  }
+		  tries++;
+		  usleep(tries * lock_delay);
+		  if (tries == lock_tries) return fd;
+		  else continue;
+		} else {
+		  if (DEBUG_GTE(SEND, 1))
+		    rprintf(FINFO, "read file lock granted.\n");
+		  /* lock successful */
+		  more = 0;
+		  break;
+		}
+	      } else {
+		  more = 0;
+	      }
+	    } else {
+	      /* file is locked */
+	      if (skipreadlock) {
+		if (DEBUG_GTE(SEND, 1))
+		  rprintf(FINFO, "skipping locked file.\n");
+		close(fd);
+		return -1;
+	      } else {
+		if (DEBUG_GTE(SEND, 1))
+		  rprintf(FINFO, "wating on file lock.\n");
+		usleep(lock_delay);
+		tries++;
+		if (tries >= lock_tries) {
+		  return fd;
+		} else continue;
+	      }
+	    }
+	  }
+	}
+
+	return fd;
+}
+#else
+#ifdef LOCK_FLOCK
+int do_open_lock(const char *pathname, int flags, mode_t mode)
+{
+        int fd, lock_type;
+
+	if (flags != O_RDONLY) {
+		RETURN_ERROR_IF(dry_run, 0);
+		RETURN_ERROR_IF_RO_OR_LO;
+	}
+
+	if (flags & O_WRONLY || flags & O_RDWR) {
+	  lock_type = LOCK_EXCLUSIVE;
+	} else {
+	  lock_type = LOCK_SHARED:
+	}
+
+
+	/* open file */
+	fd = open(pathname, flags | O_BINARY, mode);
+
+	if (fd >= 0) {
+	  /* obtain a lock on the file */
+	  flock(fd, lock_type);
+	}
+
+	return fd
+}
+#else
+int do_open_lock(const char *pathname, int flags, mode_t mode)
+{
+  return do_open(pathname, flags, mode);
+}
+#endif
+#endif
+
 
 int do_open(const char *pathname, int flags, mode_t mode)
 {
